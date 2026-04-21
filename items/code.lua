@@ -2855,6 +2855,7 @@ local run = {
 				G.STATE = G.STATES.SHOP
 				G.GAME.USING_CODE = true
 				G.GAME.USING_RUN = true
+				print("USING_RUN set to true")
 				G.GAME.RUN_STATE_COMPLETE = 0
 				G.GAME.shop_free = nil
 				G.GAME.shop_d6ed = nil
@@ -2868,11 +2869,14 @@ local run = {
 		local gfts = G.FUNCS.toggle_shop
 		G.FUNCS.toggle_shop = function(e)
 			gfts(e)
+			print("toggle_shop called, USING_RUN = " .. tostring(G.GAME.USING_RUN))
 			if G.GAME.USING_RUN then
+				print("Adding clearing event for USING_RUN")
 				G.E_MANAGER:add_event(Event({
 					trigger = "after",
 					delay = 0.5,
 					func = function()
+						print("Executing clearing event, setting USING_RUN to false")
 						G.GAME.USING_RUN = false
 						G.GAME.USING_CODE = false
 						return true
@@ -2893,6 +2897,74 @@ local run = {
 						return true
 					end,
 				}))
+			end
+		end
+		local Card_open_ref = Card.open
+		function Card:open()
+			if self.ability.set == "Booster" or G.GAME.USING_RUN then
+				print("Card:open", self.config and self.config.center and self.config.center.key or "<no center>", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN))
+			end
+			return Card_open_ref(self)
+		end
+		local run_booster_return = false
+		local use_card_ref = G.FUNCS.use_card
+		G.FUNCS.use_card = function(e, mute, nosave)
+			local card = e.config.ref_table
+			local is_booster = card and card.ability.set == 'Booster'
+			if is_booster and G.GAME.USING_RUN then
+				print("use_card booster selected while USING_RUN", "state=", tostring(G.STATE), "PACK_INTERRUPT=", tostring(G.GAME.PACK_INTERRUPT))
+			end
+			local ret = use_card_ref(e, mute, nosave)
+			if is_booster and G.GAME.USING_RUN then
+				print("use_card booster done", "state=", tostring(G.STATE), "PACK_INTERRUPT=", tostring(G.GAME.PACK_INTERRUPT))
+			end
+			return ret
+		end
+		local draw_from_hand_to_run_ref = G.FUNCS.draw_from_hand_to_run
+		G.FUNCS.draw_from_hand_to_run = function(e)
+			print("draw_from_hand_to_run start", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN), "runarea_cards=", G.cry_runarea and #G.cry_runarea.cards or 0)
+			local ret = draw_from_hand_to_run_ref(e)
+			print("draw_from_hand_to_run done", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN), "runarea_cards=", G.cry_runarea and #G.cry_runarea.cards or 0)
+			return ret
+		end
+		local end_consumeable_ref = G.FUNCS.end_consumeable
+		G.FUNCS.end_consumeable = function(e, delayfac)
+			if G.GAME.USING_RUN and G.STATE == G.STATES.SMODS_BOOSTER_OPENED then
+				run_booster_return = true
+				print("booster-return marker set")
+			end
+			print("end_consumeable start", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN), "PACK_INTERRUPT=", tostring(G.GAME.PACK_INTERRUPT), "booster_obj=", tostring(booster_obj and booster_obj.name or "nil"))
+			local ret = end_consumeable_ref(e, delayfac)
+			G.E_MANAGER:add_event(Event({
+				trigger = 'after',
+				delay = 0.7,
+				func = function()
+					print("end_consumeable followup", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN), "PACK_INTERRUPT=", tostring(G.GAME.PACK_INTERRUPT), "booster_obj=", tostring(booster_obj and booster_obj.name or "nil"))
+					return true
+				end,
+			}))
+			G.E_MANAGER:add_event(Event({
+				trigger = 'after',
+				delay = 1.5,
+				func = function()
+					print("pack interrupt check", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN), "PACK_INTERRUPT=", tostring(G.GAME.PACK_INTERRUPT), "booster_obj=", tostring(booster_obj and booster_obj.name or "nil"))
+					return true
+				end,
+			}))
+			print("end_consumeable done", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN))
+			return ret
+		end
+		if save_run then
+			local save_run_ref = save_run
+			function save_run()
+				print("save_run called", "state=", tostring(G.STATE), "USING_RUN=", tostring(G.GAME.USING_RUN), "PACK_INTERRUPT=", tostring(G.GAME.PACK_INTERRUPT))
+				if run_booster_return and G.GAME.USING_RUN and G.STATE ~= G.STATES.SMODS_BOOSTER_OPENED then
+					print("booster-return save cleanup: clearing USING_RUN before save_run")
+					G.GAME.USING_RUN = false
+					G.GAME.USING_CODE = false
+					run_booster_return = false
+				end
+				return save_run_ref()
 			end
 		end
 		local gus = Game.update_shop
